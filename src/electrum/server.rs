@@ -385,6 +385,26 @@ impl Connection {
         Ok(json!(txid))
     }
 
+    fn blockchain_transaction_broadcast_package(&self, params: &[Value]) -> Result<Value> {
+        let txs = params
+            .first()
+            .chain_err(|| "missing txs")?
+            .as_array()
+            .chain_err(|| "non-array txs")?
+            .iter()
+            .map(|tx| {
+                tx.as_str()
+                    .chain_err(|| "non-string tx")
+                    .map(|s| s.to_string())
+            })
+            .collect::<Result<Vec<String>>>()?;
+        let result = self.query.submit_package(txs, None, None)?;
+        if let Err(e) = self.chan.sender().try_send(Message::PeriodicUpdate) {
+            warn!("failed to issue PeriodicUpdate after broadcast_package: {}", e);
+        }
+        serde_json::to_value(result).chain_err(|| "failed to serialize submitpackage result")
+    }
+
     fn blockchain_transaction_get(&self, params: &[Value]) -> Result<Value> {
         let tx_hash = Txid::from(hash_from_value(params.first()).chain_err(|| "bad tx_hash")?);
         let verbose = match params.get(1) {
@@ -458,6 +478,7 @@ impl Connection {
             "blockchain.scripthash.subscribe" => self.blockchain_scripthash_subscribe(params),
             "blockchain.scripthash.unsubscribe" => self.blockchain_scripthash_unsubscribe(params),
             "blockchain.transaction.broadcast" => self.blockchain_transaction_broadcast(params),
+            "blockchain.transaction.broadcast_package" => self.blockchain_transaction_broadcast_package(params),
             "blockchain.transaction.get" => self.blockchain_transaction_get(params),
             "blockchain.transaction.get_merkle" => self.blockchain_transaction_get_merkle(params),
             "blockchain.transaction.id_from_pos" => self.blockchain_transaction_id_from_pos(params),
